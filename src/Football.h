@@ -16,7 +16,6 @@
 #include <Adafruit_MQTT.h>
 #include <Adafruit_MQTT_Client.h>
 
-
 // ID of the settings block
 #define CONFIG_VERSION "0049"
 
@@ -38,8 +37,7 @@ struct StoreStruct {
         // The default values
         //"IoTDemo", "IoTFootball",
         "XLEY", "pcross616",
-        //"52.35.108.40", 1883, "", "", "sensors",
-        "io.adafruit.com", 1883, "pcross616", "12800b573ef0499e92581e5debe7f509", "/pcross616/f/sensors",
+        "52.35.108.40", 1883, "", "", "sensors",
         "",
         CONFIG_VERSION
 };
@@ -54,10 +52,11 @@ struct StoreStruct {
 // IRQ for ADXL345
 #define ADXL345_IRQ (15)
 
+#define STATE_YAWN (-2)
 #define STATE_SLEEP (-1)
 #define STATE_UNCONFIGURED (0)
 #define STATE_NORMAL (1)
 #define STATE_ERROR (2)
 
-extern Adafruit_MQTT_Client* client;
+extern std::shared_ptr <Adafruit_MQTT_Client> client;
 extern std::shared_ptr <Adafruit_MQTT_Publish> topic;

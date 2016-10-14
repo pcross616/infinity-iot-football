@@ -15,15 +15,17 @@ Adafruit_ADXL345_Unified accel = Adafruit_ADXL345_Unified(12345);
 
 QueueList<String> queue;
 WiFiClient        espClient;
-Adafruit_MQTT_Client* client = NULL;
-std::shared_ptr <Adafruit_MQTT_Publish> topic = NULL;
 
-uint8_t           last_uid[] = { 0, 0, 0, 0, 0, 0, 0 };
-unsigned long     last_uid_update = 0;
-unsigned long     last_reconnect  = 0;
+std::shared_ptr<Adafruit_MQTT_Client>  client = NULL;
+std::shared_ptr<Adafruit_MQTT_Publish> topic  = NULL;
+
+uint8_t       last_uid[] = { 0, 0, 0, 0, 0, 0, 0 };
+uint8_t       prev_uid[] = { 0, 0, 0, 0, 0, 0, 0 };
+unsigned long last_uid_update = 0;
+unsigned long prev_uid_update = 0;
+unsigned long last_reconnect  = 0;
 
 int state = STATE_UNCONFIGURED;
-
 
 
 // *** Supporting Functions *** //
@@ -129,6 +131,8 @@ bool isSleepy()
  */
 void sleepNow()
 {
+   state = STATE_YAWN;
+
    Serial.println("Sleeping ADXL345 and clearing IRQ.");
    //disable the interrupt till we are configured
    accel.writeRegister(ADXL345_REG_INT_ENABLE, 0x00);
@@ -136,8 +140,21 @@ void sleepNow()
 
    digitalWrite(ADXL345_IRQ, LOW);
 
+   Serial.print("Flush events in MQTT queue.");
+   int trys = 0;
+   while (!queue.isEmpty() && trys < 10)
+   {
+      Serial.print(".");
+      delay(500);
+      trys++;
+   }
+
+   Serial.println("");
    Serial.println("Sleeping MQTT connections.");
-   client->disconnect();
+   if (client->connected())
+   {
+      client->disconnect();
+   }
    Serial.println("Sleeping WiFi connection.");
    WiFi.disconnect(false);
    digitalWrite(BUILTIN_LED, LOW);      //making it blink during read
@@ -184,12 +201,18 @@ void readRFID()
          Serial.println(cardid);
       }
       Serial.println("");
+
       digitalWrite(BUILTIN_LED, HIGH);           //making it blink during read
    }
 
    //do we need to update last tracked.
    if (success && ((sizeof(uid) != sizeof(last_uid)) || (!memcmp(uid, last_uid, sizeof(uid)) == 0)))
    {
+     //store the old id
+      //memcpy(prev_uid, last_uid, 7);
+      //prev_uid_update = millis();
+
+      //whats the current id
       memcpy(last_uid, uid, 7);
       last_uid_update = millis();
       Serial.println("Updating last read rfid_tag uid.");
@@ -205,9 +228,11 @@ void readRFID()
       //data.printTo(Serial);
       data.printTo(data_buffer, sizeof(data_buffer));
       queue.push(data_buffer);
-   } else if (success) {
-     //just update the last time it was read, tag did not change.
-     last_uid_update = millis();
+   }
+   else if (success)
+   {
+      //just update the last time it was read, tag did not change.
+      last_uid_update = millis();
    }
 }
 
@@ -222,11 +247,19 @@ void readAccel()
    {
       digitalWrite(BUILTIN_LED, LOW);           //making it blink during read
       StaticJsonBuffer<1024> jsonBuffer;
-      JsonObject&           data = jsonBuffer.createObject();
+      JsonObject&            data = jsonBuffer.createObject();
       if ((millis() - last_uid_update) <= 30000)             //if the read is within 30 sec add to event
       {
          data["rfid_tag"] = hex_str(last_uid, sizeof(last_uid));
       }
+      // if ((millis() - prev_uid_update) <= 5000)             //if the read is within 30 sec add to event
+      // {
+      //    data["rfid_tag_prev"] = hex_str(prev_uid, sizeof(prev_uid));
+      // }
+
+      //add the current millis to the generated event.
+      data["movement_time"] = millis();
+
       //detected actions
       String movement = "";
       if ((source >> 6) & 1)             //tap/knock
@@ -234,22 +267,23 @@ void readAccel()
          movement += (movement.length() == 0 ? "" : ";");
          movement += "knock";
       }
-      if ((source >> 4) & 1)             //activity
+      else if ((source >> 2) & 1)             //freefall
+      {
+         movement += (movement.length() == 0 ? "" : ";");
+         movement += "freefall";
+      }
+      else if ((source >> 4) & 1)        //activity
       {
          movement += (movement.length() == 0 ? "" : ";");
          movement += "activity";
       }
-      if ((source >> 3) & 1)             //inactivity
+      else if ((source >> 3) & 1)             //inactivity
       {
          movement += (movement.length() == 0 ? "" : ";");
          movement += "inactivity";
          inactive  = true;
       }
-      if ((source >> 2) & 1)             //freefall
-      {
-         movement += (movement.length() == 0 ? "" : ";");
-         movement += "freefall";
-      }
+
       data["movement"] = movement;
 
       /* Get a new sensor event */
@@ -257,14 +291,14 @@ void readAccel()
       accel.getEvent(&event);
 
       //set the x,y,z
-      int x = event.acceleration.x;
-      int y = event.acceleration.y;
-      int z = event.acceleration.z;
+      int x = abs(event.acceleration.x);
+      int y = abs(event.acceleration.y);
+      int z = abs(event.acceleration.z);
 
       //data["movement_source"] = byte_str(source);
-      data["movement_x"]      = x;
-      data["movement_y"]      = y;
-      data["movement_z"]      = z;
+      data["movement_x"] = x;
+      data["movement_y"] = y;
+      data["movement_z"] = z;
 
       //data.printTo(Serial);
 
@@ -320,7 +354,7 @@ void reconnect()
       // Attempt to connect
       if (client->connect(settings.MQTT_USERNAME, settings.MQTT_PASSWORD) == 0)
       {
-         Serial.println("connected");
+         Serial.println(".. connected");
          StaticJsonBuffer<512> jsonBuffer;
          JsonObject&           data = jsonBuffer.createObject();
          // Once connected, publish an announcement...
@@ -345,16 +379,13 @@ void reconnect()
  */
 void publish(char *data)
 {
-
-   Serial.printf("%td\n",(ptrdiff_t)client);
-   if (!client->connected() == 0)
+   if (!client->connected())
    {
-      Serial.print("got connected");
       reconnect();
    }
-   if (!isSleepy())
+   if (client->connected() && !isSleepy())
    {
-      Serial.print("Publish data: ");
+      Serial.print("Publish Data: ");
       Serial.println(data);
       digitalWrite(BUILTIN_LED, LOW);           // Turn the LED on (Note that LOW is the voltage level
       topic->publish(data);
@@ -375,7 +406,7 @@ void processQueue()
       Serial.print(val);
       Serial.println("");
       char data[val.length()];
-      val.toCharArray(data, val.length());
+      val.toCharArray(data, val.length() + 1);
       publish(data);
       digitalWrite(BUILTIN_LED, HIGH);           //making it blink during read
    }
@@ -552,10 +583,9 @@ void setup_rfid()
  */
 void setup_mqtt()
 {
-   Adafruit_MQTT_Client client(&espClient, settings.MQTT_SERVER, settings.MQTT_PORT, settings .MQTT_USERNAME, settings.MQTT_PASSWORD);
-   topic = std::shared_ptr <Adafruit_MQTT_Publish>(new Adafruit_MQTT_Publish(&client, settings.MQTT_TOPIC));
-   //client.setServer(settings.MQTT_SERVER, settings.MQTT_PORT);
-   //client.setCallback(callback);
+   client = std::shared_ptr<Adafruit_MQTT_Client> (new Adafruit_MQTT_Client(&espClient, settings.MQTT_SERVER,
+                                                                            settings.MQTT_PORT, settings.MQTT_USERNAME, settings.MQTT_PASSWORD));
+   topic = std::shared_ptr<Adafruit_MQTT_Publish>(new Adafruit_MQTT_Publish(&*client, settings.MQTT_TOPIC));
 }
 
 
@@ -569,7 +599,6 @@ void setup_wifi()
    Serial.println();
    Serial.print("Connecting to ");
    Serial.print(settings.SSID);
-
 
    WiFi.begin(settings.SSID, settings.SSID_PASSWORD);
    int connect_trys = 0;
@@ -632,6 +661,8 @@ void setup_wifi()
    Serial.println("WiFi connected");
    Serial.println("IP address: ");
    Serial.println(WiFi.localIP());
+
+
    state = STATE_NORMAL;
 }
 
@@ -718,12 +749,13 @@ void saveEEPROM()
       // and verifies the data
       if (EEPROM.read(CONFIG_START + t) != *((char *)&settings + t))
       {
-        Serial.print("X");
+         Serial.print("X");
          // error writing to EEPROM
-      } else {
-        Serial.print(".");
       }
-
+      else
+      {
+         Serial.print(".");
+      }
    }
    Serial.println("");
    EEPROM.commit();
@@ -746,14 +778,14 @@ bool loadEEPROM()
    {      // reads settings from EEPROM
       for (unsigned int t = 0; t < sizeof(settings); t++)
       {
-        Serial.print(".");
+         Serial.print(".");
          *((char *)&settings + t) = EEPROM.read(CONFIG_START + t);
       }
    }
    else
    {
-     Serial.println("..... Error loading settings from EEPROM, using defaults.");
-     return false;
+      Serial.println("..... Error loading settings from EEPROM, using defaults.");
+      return false;
    }
    Serial.println("Done");
    return true;
@@ -864,7 +896,7 @@ void configure(int timeout = 5000)
    }
    //close out the EEPROM
    EEPROM.end();
-}
+  }
 
 
 /**
@@ -886,6 +918,7 @@ void setup()
 
    //Setup components
    setup_wifi();
+
    if (state == STATE_NORMAL)
    {
       setup_rfid();
@@ -923,11 +956,15 @@ void loop()
    if (state == STATE_NORMAL)
    {
       digitalWrite(BUILTIN_LED, HIGH);     //make sure its off during init.
-      //handle main loop
+      //handle rfid in the main loop
       readRFID();
-      //sensorEvent();
-
-      //process the queue to ensure all the data is on the wire
-      processQueue();
    }
+   if ((state == STATE_NORMAL) || (state == STATE_YAWN))
+   {
+   //process the queue to ensure all the data is on the wire
+    processQueue();
+   }
+
+   //prevent lockups
+   yield();
 }
