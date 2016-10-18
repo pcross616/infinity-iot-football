@@ -18,8 +18,6 @@ uint8_t       prev_uid[] = { 0, 0, 0, 0, 0, 0, 0 };
 unsigned long last_uid_update = 0;
 unsigned long prev_uid_update = 0;
 
-char* gameId;
-
 int state = STATE_UNCONFIGURED;
 
 
@@ -194,20 +192,24 @@ void readRFID()
       memcpy(last_uid, uid, 7);
       last_uid_update = millis();
       Serial.println("Updating last read rfid_tag uid.");
-      //
-      // StaticJsonBuffer<512> jsonBuffer;
-      // JsonObject&           data = jsonBuffer.createObject();
-      //
-      // String tag = hex_str(last_uid, sizeof(last_uid));
-      // Serial.print("Tag: ");
-      // Serial.println(tag);
-      // data.set<String>("rfid_tag", tag);
-      // char data_buffer[512];
-      // //data.printTo(Serial);
-      // data.printTo(data_buffer, sizeof(data_buffer));
 
-      //clean up memory
-      //queue.push(data_buffer);
+      StaticJsonBuffer<512> jsonBuffer;
+      JsonObject&           data = jsonBuffer.createObject();
+
+      String tag = hex_str(last_uid, sizeof(last_uid));
+      Serial.print("Tag: ");
+      Serial.println(tag);
+
+      //set the dcsvid to the active rfid_tag hash
+      data["dcsvid"] = hash_string(tag.c_str());
+      //data["wt.vt_sid"] = settings.IOT_ID;
+      data.set<String>("movement", "tag_read");
+      data.set<String>("rfid_tag", tag);
+
+      String data_buffer = "";
+      data.printTo(data_buffer);
+
+      queue.push(data_buffer);
    }
    else if (success)
    {
@@ -232,7 +234,7 @@ void readAccel()
       //set the dcsvid to the active rfid_tag hash
       String rfid_tag = hex_str(last_uid, sizeof(last_uid));
       data["dcsvid"] = hash_string(rfid_tag.c_str());
-      data["wt.vt_sid"] = settings.IOT_ID;
+      //data["wt.vt_sid"] = settings.IOT_ID;
 
 
       if ((millis() - last_uid_update) <= 30000)             //if the read is within 30 sec add to event
