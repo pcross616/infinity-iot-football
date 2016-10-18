@@ -7,12 +7,6 @@ Adafruit_PN532 nfc(PN532_SS);
 /* Assign a unique ID to this sensor at the same time */
 Adafruit_ADXL345_Unified accel = Adafruit_ADXL345_Unified(12345);
 
-#if defined(ARDUINO_ARCH_SAMD)
-// for Zero, output on USB Serial console, remove line below if using programming port to program the Zero!
-// also change #define in Adafruit_PN532.cpp library file
-#define Serial    SerialUSB
-#endif
-
 QueueList<String> queue;
 WiFiClient        espClient;
 
@@ -23,7 +17,8 @@ uint8_t       last_uid[] = { 0, 0, 0, 0, 0, 0, 0 };
 uint8_t       prev_uid[] = { 0, 0, 0, 0, 0, 0, 0 };
 unsigned long last_uid_update = 0;
 unsigned long prev_uid_update = 0;
-unsigned long last_reconnect  = 0;
+
+char* gameId;
 
 int state = STATE_UNCONFIGURED;
 
@@ -92,6 +87,13 @@ String byte_str(byte val)
    return value;
 }
 
+inline size_t hash_string(const char* __s)
+{
+  unsigned long __h = 0;
+  for ( ; *__s; ++__s)
+    __h = 5*__h + *__s;
+  return size_t(__h);
+}
 
 void displayAllSensorRegister()
 {
@@ -140,16 +142,6 @@ void sleepNow()
 
    digitalWrite(ADXL345_IRQ, LOW);
 
-   Serial.print("Flush events in MQTT queue.");
-   int trys = 0;
-   while (!queue.isEmpty() && trys < 10)
-   {
-      Serial.print(".");
-      delay(500);
-      trys++;
-   }
-
-   Serial.println("");
    Serial.println("Sleeping MQTT connections.");
    if (client->connected())
    {
@@ -186,20 +178,6 @@ void readRFID()
       Serial.println(" bytes");
       Serial.print("  UID Value: ");
       nfc.PrintHex(uid, uidLength);
-
-      if (uidLength == 4)
-      {
-         // We probably have a Mifare Classic card ...
-         uint32_t cardid = uid[0];
-         cardid <<= 8;
-         cardid  |= uid[1];
-         cardid <<= 8;
-         cardid  |= uid[2];
-         cardid <<= 8;
-         cardid  |= uid[3];
-         Serial.print("Seems to be a Mifare Classic card #");
-         Serial.println(cardid);
-      }
       Serial.println("");
 
       digitalWrite(BUILTIN_LED, HIGH);           //making it blink during read
@@ -208,7 +186,7 @@ void readRFID()
    //do we need to update last tracked.
    if (success && ((sizeof(uid) != sizeof(last_uid)) || (!memcmp(uid, last_uid, sizeof(uid)) == 0)))
    {
-     //store the old id
+      //store the old id
       //memcpy(prev_uid, last_uid, 7);
       //prev_uid_update = millis();
 
@@ -216,18 +194,20 @@ void readRFID()
       memcpy(last_uid, uid, 7);
       last_uid_update = millis();
       Serial.println("Updating last read rfid_tag uid.");
+      //
+      // StaticJsonBuffer<512> jsonBuffer;
+      // JsonObject&           data = jsonBuffer.createObject();
+      //
+      // String tag = hex_str(last_uid, sizeof(last_uid));
+      // Serial.print("Tag: ");
+      // Serial.println(tag);
+      // data.set<String>("rfid_tag", tag);
+      // char data_buffer[512];
+      // //data.printTo(Serial);
+      // data.printTo(data_buffer, sizeof(data_buffer));
 
-      StaticJsonBuffer<512> jsonBuffer;
-      JsonObject&           data = jsonBuffer.createObject();
-
-      String tag = hex_str(last_uid, sizeof(last_uid));
-      Serial.print("Tag: ");
-      Serial.println(tag);
-      data.set<String>("rfid_tag", tag);
-      char data_buffer[512];
-      //data.printTo(Serial);
-      data.printTo(data_buffer, sizeof(data_buffer));
-      queue.push(data_buffer);
+      //clean up memory
+      //queue.push(data_buffer);
    }
    else if (success)
    {
@@ -246,15 +226,22 @@ void readAccel()
           ((source >> 3) & 1) || ((source >> 2) & 1))
    {
       digitalWrite(BUILTIN_LED, LOW);           //making it blink during read
-      StaticJsonBuffer<1024> jsonBuffer;
+      StaticJsonBuffer<256> jsonBuffer;
       JsonObject&            data = jsonBuffer.createObject();
+
+      //set the dcsvid to the active rfid_tag hash
+      String rfid_tag = hex_str(last_uid, sizeof(last_uid));
+      data["dcsvid"] = hash_string(rfid_tag.c_str());
+      data["wt.vt_sid"] = settings.IOT_ID;
+
+
       if ((millis() - last_uid_update) <= 30000)             //if the read is within 30 sec add to event
       {
-         data["rfid_tag"] = hex_str(last_uid, sizeof(last_uid));
+         data["rfid_tag"] = rfid_tag;
       }
       // if ((millis() - prev_uid_update) <= 5000)             //if the read is within 30 sec add to event
       // {
-      //    data["rfid_tag_prev"] = hex_str(prev_uid, sizeof(prev_uid));
+      //      data["rfid_tag_source"] = hex_str(prev_uid, sizeof(prev_uid));
       // }
 
       //add the current millis to the generated event.
@@ -306,14 +293,11 @@ void readAccel()
       data.printTo(data_buffer);
 
       queue.push(data_buffer);
-      Serial.print("Data Buffer: ");
-      Serial.println(data_buffer);
-      Serial.print("Payload: ");
-      data.printTo(Serial);
-      Serial.println("");
+      //publish(data_buffer.c_str());
+
       Serial.print("Source: ");
       print_byte(source);
-      Serial.println("");
+      Serial.print(" ");
       Serial.print("X: ");
       Serial.print(x);
       Serial.print(" ");
@@ -327,6 +311,7 @@ void readAccel()
 
       source = accel.readRegister(ADXL345_REG_INT_SOURCE);
       digitalWrite(BUILTIN_LED, HIGH);           //making it blink during read
+
    }
 
    //displayAllSensorRegister();
@@ -334,7 +319,7 @@ void readAccel()
 
    if (inactive)
    {
-      sleepNow();
+      //sleepNow();
    }
 }
 
@@ -367,8 +352,8 @@ void reconnect()
       else
       {
          Serial.println(" will try again in in a bit.");
-         // Wait 5 seconds before retrying
-         //delay(5000);
+         // Wait 1 seconds before retrying
+         delay(1000);
       }
    }
 }
@@ -377,7 +362,7 @@ void reconnect()
 /**
  * Publish data to MQTT,
  */
-void publish(char *data)
+void publish(const char *data)
 {
    if (!client->connected())
    {
@@ -405,10 +390,8 @@ void processQueue()
       Serial.print("Process Queue: ");
       Serial.print(val);
       Serial.println("");
-      char data[val.length()];
-      val.toCharArray(data, val.length() + 1);
-      publish(data);
-      digitalWrite(BUILTIN_LED, HIGH);           //making it blink during read
+      publish(val.c_str());
+      digitalWrite(BUILTIN_LED, HIGH);         //making it blink during read
    }
 }
 
@@ -586,6 +569,8 @@ void setup_mqtt()
    client = std::shared_ptr<Adafruit_MQTT_Client> (new Adafruit_MQTT_Client(&espClient, settings.MQTT_SERVER,
                                                                             settings.MQTT_PORT, settings.MQTT_USERNAME, settings.MQTT_PASSWORD));
    topic = std::shared_ptr<Adafruit_MQTT_Publish>(new Adafruit_MQTT_Publish(&*client, settings.MQTT_TOPIC));
+
+   //client->ping();
 }
 
 
@@ -669,12 +654,6 @@ void setup_wifi()
 
 void setup_sensors()
 {
-// #ifndef ESP8266
-//    while (!Serial)        // for Leonardo/Micro/Zero
-//    {
-//    }
-// #endif
-
    Serial.println("Accelerometer Initialization...!");
    Serial.println("");
 
@@ -707,7 +686,7 @@ void setup_sensors()
 
    //configure tap/knock thresholds
    accel.writeRegister(ADXL345_REG_TAP_AXES, 0x21);   //enable tap/knock detection
-   accel.writeRegister(ADXL345_REG_THRESH_TAP, 0x32); //100mg, or greater = a tap/knock
+   accel.writeRegister(ADXL345_REG_THRESH_TAP, 0x64); //100mg, or greater = a tap/knock
    accel.writeRegister(ADXL345_REG_DUR, 0x0F);        //need to be greater than 625 μs/LSB to count as a knock
    //accel.writeRegister(ADXL345_REG_LATENT, 0x10); // min dealy between taps 2ms
    //accel.writeRegister(ADXL345_REG_WINDOW, 0x64); // allow up to 150ms for multipul tap (aka double tap)
@@ -894,9 +873,12 @@ void configure(int timeout = 5000)
          Serial.println("Using current EEPROM configuration.");
       }
    }
+   strcpy(settings.IOT_ID, (String(settings.IOT_ID) + "-" + String(random(0xffff), HEX)).c_str());
+   Serial.printf("Starting Game ID: %s\n", settings.IOT_ID);
+
    //close out the EEPROM
    EEPROM.end();
-  }
+}
 
 
 /**
@@ -961,10 +943,7 @@ void loop()
    }
    if ((state == STATE_NORMAL) || (state == STATE_YAWN))
    {
-   //process the queue to ensure all the data is on the wire
-    processQueue();
+      //process the queue to ensure all the data is on the wire
+      processQueue();
    }
-
-   //prevent lockups
-   yield();
 }

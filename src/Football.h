@@ -37,8 +37,9 @@ struct StoreStruct {
         // The default values
         //"IoTDemo", "IoTFootball",
         "XLEY", "pcross616",
+        //"wtguest", "winnerwinnerchickendinner",
         "52.35.108.40", 1883, "", "", "sensors",
-        "",
+        "IoTFootball",
         CONFIG_VERSION
 };
 
@@ -60,3 +61,6 @@ struct StoreStruct {
 
 extern std::shared_ptr <Adafruit_MQTT_Client> client;
 extern std::shared_ptr <Adafruit_MQTT_Publish> topic;
+
+
+void publish(const char*);
