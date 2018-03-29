@@ -25,7 +25,7 @@ flowFile = session.write(flowFile,
             //     data.action = "pass"
             //     //map.put(data.rfid_tag, (String.valueOf(System.currentTimeMillis()) + ":" + data.action))
             // } else
-            if (data.rfid_tag !=null && data.movement_z >= 5 && data.movement_x >= 4 && data.movement == "knock") {
+            if (data.rfid_tag !=null && data.m_z >= 5 && data.m_x >= 4 && data.movement == "knock") {
                 data.action = "pass"
                 props.setProperty(data.rfid_tag, "catch")
             }
@@ -54,15 +54,17 @@ flowFile = session.write(flowFile,
                 props.remove(data.rfid_tag_source + ":source:v")
               }
               def vObj = slurper.parseText(vObjJson)
-              if (data.action != "catch" && (vObj.vcount == 0 || (data.movement_time - vObj.t) <= 5000)) {
+              if (data.action != "catch" && (vObj.vcount == 0 || (data.m_time - vObj.t) <= 5000)) {
                 //seed with the current speed if its the first time
-                def v = data.movement_x
+                def v = data.m_x
+                def pt = 500; //give them 1/2 second by default
                 if (vObj.vcount != 0) {
                   //v = ax0 + ax1t
-                  v = vObj.ax0 + (data.movement_x * (data.movement_time - vObj.t))
+                  v = vObj.ax0 + (data.m_x * (data.m_time - vObj.t))  
+                  pt += data.m_time - vObj.t
                 }
-                vObj.ax0 = data.movement_x
-                vObj.t = data.movement_time
+                vObj.ax0 = data.m_x
+                vObj.t = data.m_time
                 vObj.vavg = vObj.vavg + v
                 vObj.vcount++;
 
@@ -72,17 +74,19 @@ flowFile = session.write(flowFile,
                   props.remove(data.rfid_tag + ":v")
                   //ensure it on the source for the catcher event
                   props.setProperty(data.rfid_tag + ":source:v", groovy.json.JsonOutput.toJson(vObj))
-                } else if (data.action != "catch") {
-                  props.getProperty(data.rfid_tag + ":v", groovy.json.JsonOutput.toJson(vObj))
+                } else {
+                  props.setProperty(data.rfid_tag + ":v", groovy.json.JsonOutput.toJson(vObj))
                 }
 
                 //add data elements
                 data.velocity_x = (vObj.vavg / vObj.vcount);
-                data.force = data.movement_x * 350;
+                data.force = data.m_x * 350;
+                data.p_time = pt
               } else if (data.action == "catch") {
                 //add data elements
                 data.velocity_x = (vObj.vavg / vObj.vcount);
                 data.force = vObj.ax0 * 350;
+                data.p_time = 500 //give 1/2 sec by default
               } else {
                 //reset
                 props.remove(data.rfid_tag + ":v")
