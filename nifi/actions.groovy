@@ -44,7 +44,7 @@ flowFile = session.write(flowFile,
 
             //calulate speed
             if (data.rfid_tag !=null && ((data.movement == "activity" || data.movement == "knock") || data.action == "catch")) {
-              def vObjJson = '{"ax0" : 0, "t": 0, "vavg": 0, "vcount": 0}'
+              def vObjJson = '{"ax0" : 0, "t": 0, "j": 0, "vavg": 0, "vcount": 0}'
               if (props.getProperty(data.rfid_tag + ":v") != null) {
                 vObjJson = props.getProperty(data.rfid_tag + ":v")
               }
@@ -53,23 +53,27 @@ flowFile = session.write(flowFile,
                 //clear it
                 props.remove(data.rfid_tag_source + ":source:v")
               }
+
               def vObj = slurper.parseText(vObjJson)
-              if (data.action != "catch" && (vObj.vcount == 0 || (data.m_time - vObj.t) <= 5000)) {
+              if ((data.m_time >= vObj.t) && (vObj.vcount == 0 || (data.m_time - vObj.t) <= 5000)) {
+                if (vObj.vcount == 0 || vObj.j == null) {
+                  vObj.j = data.m_time;
+                }
                 //seed with the current speed if its the first time
                 def v = data.m_x
-                def pt = 500; //give them 1/2 second by default
+                def pt = 20; //give them 20ms by default
                 if (vObj.vcount != 0) {
                   //v = ax0 + ax1t
                   v = vObj.ax0 + (data.m_x * (data.m_time - vObj.t))  
-                  pt += data.m_time - vObj.t
+                  pt = data.m_time - vObj.j
                 }
-                vObj.ax0 = data.m_x
                 vObj.t = data.m_time
+                vObj.ax0 = data.m_x
                 vObj.vavg = vObj.vavg + v
                 vObj.vcount++;
 
                 //update map
-                if (data.rfid_tag != null && data.action == "pass") {
+                if (data.rfid_tag != null && data.movement == "knock") {
                   //reset to start a new calc
                   props.remove(data.rfid_tag + ":v")
                   //ensure it on the source for the catcher event
@@ -79,15 +83,16 @@ flowFile = session.write(flowFile,
                 }
 
                 //add data elements
-                data.velocity_x = (vObj.vavg / vObj.vcount);
+                data.velocity_x = java.lang.Math.abs((vObj.vavg / vObj.vcount));
                 data.force = data.m_x * 350;
                 data.p_time = pt
               } else if (data.action == "catch") {
                 //add data elements
-                data.velocity_x = (vObj.vavg / vObj.vcount);
+                data.velocity_x = java.lang.Math.abs((vObj.vavg / vObj.vcount));
                 data.force = vObj.ax0 * 350;
-                data.p_time = 500 //give 1/2 sec by default
+                data.p_time = 20 //give 1/2 sec by default
               } else {
+                data.p_time = 20 //give 1/2 sec by default
                 //reset
                 props.remove(data.rfid_tag + ":v")
               }

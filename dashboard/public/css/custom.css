@@ -1,0 +1,133 @@
+.edit-bar {
+  padding-top: 10px;
+  padding-bottom: 10px;
+}
+@media (min-width: 1200px) {
+  .container {
+    max-width: 95%;
+  }
+}
+
+@font-face {
+  font-family: SFUIDisplay;
+  font-weight: 100;
+  src: url("/public/fonts/SFUIDisplay-Thin.otf") format("opentype");
+}
+@font-face {
+  font-family: SFUIDisplay;
+  src: url("/public/fonts/SFUIText-Regular.otf") format("opentype");
+}
+@font-face {
+  font-family: SFUIDisplay;
+  font-weight: lighter;
+  src: url("/public/fonts/SFUIText-Light.otf") format("opentype");
+}
+
+.dashboardHeader {
+  text-align: center;
+  height: 45px;
+  padding-top: 10px;
+  background-color: #1c2431;
+}
+
+.team-header-right-icon {
+  display: block;
+  margin: 0 auto;
+}
+
+.team-header-left-icon {
+  display: block;
+  margin: 0 auto;
+}
+
+.player-data-table {
+  width: 100%;
+  padding: 20px;
+}
+
+.possesion-left-label {
+  font-family: SFUIDisplay;
+  font-weight: lighter;
+  fill: #3A9AEA;
+  font-size: 32px
+}
+
+.possesion-label {
+  font-family: SFUIDisplay;
+  font-weight: lighter;
+  fill: #FFFFFF;
+  font-size: 32px
+}
+
+.team-header-right-icon-svg {
+  fill: #3A9AEA;
+  -moz-transform: scaleX(-1);
+  -o-transform: scaleX(-1);
+  -webkit-transform: scaleX(-1);
+  transform: scaleX(-1);
+  filter: FlipH;
+  -ms-filter: "FlipH";
+  width: 80px;
+  display: block;
+  margin: 0 auto;
+}
+
+.team-header-left-icon-svg {
+  fill: #3CDDB3;
+  width: 80px;
+  display: block;
+  margin: 0 auto;
+}
+
+.speed-inc-label {
+  fill: #737E8D;
+  font-family: SFUIDisplay;
+  font-weight: lighter;
+  font-size: 16px;
+}
+
+.speed-last-label {
+  font-family: SFUIDisplay;
+  font-weight: 100;
+  fill: #FFFFFF;
+  font-size: 80px
+}
+
+.speed-prev-right-label {
+  font-family: SFUIDisplay;
+  font-weight: 100;
+  fill: #2FB895;
+  font-size: 50px
+}
+
+.speed-prev-left-label {
+  font-family: SFUIDisplay;
+  font-weight: 100;
+  fill: #3A9AEA;
+  font-size: 50px
+}
+
+.speed-mph-label {
+  font-family: SFUIDisplay;
+  font-weight: normal;
+  fill: #FFFFFF;
+  font-size: 30px
+}
+
+.speed-player-right-label {
+  font-family: SFUIDisplay;
+  font-weight: lighter;
+  fill: #2FB895;
+  font-size: 30px
+}
+
+.speed-player-left-label {
+  font-family: SFUIDisplay;
+  font-weight: lighter;
+  fill: #3A9AEA;
+  font-size: 30px
+}
+
+.player-data {
+  margin-bottom: 40px;
+}
