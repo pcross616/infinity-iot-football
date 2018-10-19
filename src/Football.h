@@ -45,6 +45,9 @@ struct StoreStruct {
               "IoTFootball",
               "IoTFootball"};
 
+#define TEST_NETWORK_HOST ("dc.oracleinfinity.io")
+#define TEST_NETWORK_HOST_PORT (443)
+
 // If using the PN532 with SPI, define the pins for SPI communication.
 #define PN532_SCK (14)
 #define PN532_MOSI (13)
@@ -71,6 +74,10 @@ struct StoreStruct {
 //#define IOTFOOTBALL_ALLOW_SLEEP
 
 //comment out these lines to change debug levels
+#define IOTFOOTBALL_INFO
+//#define IOTFOOTBALL_DEBUG
+//#define IOTFOOTBALL_TRACE
+
 #ifdef IOTFOOTBALL_DEBUG
 #define PN532DEBUG
 #define MQTT_DEBUG

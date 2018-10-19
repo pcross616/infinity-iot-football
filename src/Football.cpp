@@ -15,9 +15,9 @@ std::shared_ptr<Adafruit_MQTT_Client> client = NULL;
 std::shared_ptr<Adafruit_MQTT_Publish> topic = NULL;
 
 static uint8_t last_uid[] = {0, 0, 0, 0, 0, 0, 0};
-static uint8_t prev_uid[] = {0, 0, 0, 0, 0, 0, 0};
+//static uint8_t prev_uid[] = {0, 0, 0, 0, 0, 0, 0};
 static unsigned long last_uid_update = 0;
-static unsigned long prev_uid_update = 0;
+//static unsigned long prev_uid_update = 0;
 
 static int state = STATE_UNCONFIGURED;
 
@@ -27,7 +27,7 @@ static DoubleResetDetector drd(DRD_TIMEOUT, DRD_ADDRESS);
  * Setup the connections and chips
  */
 void setup() {
-  pinMode(BUILTIN_LED, OUTPUT); // Initialize the BUILTIN_LED pin as an output
+  pinMode(LED_BUILTIN, OUTPUT); // Initialize the LED_BUILTIN pin as an output
   Serial.begin(115200);
   delay(2000);
 
@@ -57,7 +57,7 @@ void setup() {
     setup_rfid();
     setup_sensors();
 
-    digitalWrite(BUILTIN_LED, HIGH); // make sure its off during init.
+    digitalWrite(LED_BUILTIN, HIGH); // make sure its off during init.
   }
 
   // setup the queue
@@ -69,6 +69,13 @@ void setup() {
  * Main process loop
  */
 void loop() {
+  if (state == STATE_ERROR) {
+    if (!ticker.active()) {
+      Serial.println("IoTFootball in ERROR state... please reconfigure.");
+      ticker.attach(0.1, tick);
+    }
+  }
+
   if (state == STATE_YAWN) { // get ready for bed
     sleepSensors();
   }
@@ -77,12 +84,12 @@ void loop() {
   {
     Serial.println("Sleeping ESP8266 in 5 seconds.");
     delay(5000);
-    digitalWrite(BUILTIN_LED, LOW); // make sure its off during sleep.
+    digitalWrite(LED_BUILTIN, LOW); // make sure its off during sleep.
     ESP.deepSleep(0);
   }
 
   if (state == STATE_NORMAL) {
-    digitalWrite(BUILTIN_LED, HIGH); // make sure its off during init.
+    digitalWrite(LED_BUILTIN, HIGH); // make sure its off during init.
     // handle rfid in the main loop
     sensorReadRFID();
   }
@@ -90,6 +97,7 @@ void loop() {
     // process the queue to ensure all the data is on the wire
     processQueue();
   }
+  drd.loop();
 }
 
 /**
@@ -171,7 +179,7 @@ void setup_wifi() {
     Serial.println(
         "Failed to connect to Wifi and hit timeout, going to sleep.");
     // reset and try again, or maybe put it to deep sleep
-    digitalWrite(BUILTIN_LED, LOW); // make sure its off during sleep.
+    digitalWrite(LED_BUILTIN, LOW); // make sure its off during sleep.
     ESP.deepSleep(0);
   }
   // or use this for auto generated name ESP + ChipID
@@ -181,13 +189,17 @@ void setup_wifi() {
   Serial.println("connected... ");
 
   // make a MQTT connection
+  strcpy(settings.MQTT_SERVER, custom_mqtt_server.getValue());
+  strcpy(settings.MQTT_PORT, custom_mqtt_port.getValue());
+  strcpy(settings.MQTT_USERNAME, custom_mqtt_username.getValue());
+  strcpy(settings.MQTT_PASSWORD, custom_mqtt_password.getValue());
+  strcpy(settings.MQTT_TOPIC, custom_mqtt_topic.getValue());
+
 
   client = std::shared_ptr<Adafruit_MQTT_Client>(new Adafruit_MQTT_Client(
-      &espClient, custom_mqtt_server.getValue(),
-      atoi(custom_mqtt_port.getValue()), custom_mqtt_username.getValue(),
-      custom_mqtt_password.getValue()));
+      &espClient, settings.MQTT_SERVER, atoi(settings.MQTT_PORT), settings.MQTT_USERNAME, settings.MQTT_PASSWORD));
   topic = std::shared_ptr<Adafruit_MQTT_Publish>(
-      new Adafruit_MQTT_Publish(&*client, custom_mqtt_topic.getValue()));
+      new Adafruit_MQTT_Publish(&*client, settings.MQTT_TOPIC));
 
   randomSeed(micros());
 
@@ -225,7 +237,26 @@ void setup_wifi() {
 
   // wifi startup done
   ticker.detach();
-  digitalWrite(BUILTIN_LED, LOW);
+  
+  //test connections
+  WiFiClient client;
+  if(client.connect(TEST_NETWORK_HOST, TEST_NETWORK_HOST_PORT)) {
+    Serial.printf("Network Test OK [%d]\n", client.status());
+  } else {
+    Serial.printf("Network Test FAILED [%d]\n", client.status());
+    state = STATE_ERROR;
+  }
+  client.stop();
+  
+  if(client.connect(settings.MQTT_SERVER, atoi(settings.MQTT_PORT))) {
+    Serial.printf("MQTT Connection Test OK [%d]\n", client.status());
+  } else {
+    Serial.printf("MQTT Connection Test FAILED [%d]\n", client.status());
+    state = STATE_ERROR;
+  }
+  client.stop();
+
+  digitalWrite(LED_BUILTIN, LOW);
 }
 
 void setup_sensors() {
@@ -240,8 +271,14 @@ void setup_sensors() {
     }
   }
 
+
+  //accel.writeRegister(ADXL345_REG_BW_RATE, ADXL345_DATARATE_0_10_HZ);
+  accel.writeRegister(ADXL345_REG_OFSY, 0x07);
+  accel.writeRegister(ADXL345_REG_OFSX, 0x08);
+  accel.writeRegister(ADXL345_REG_OFSZ, 0x02);
+
   /* Set the range to whatever is appropriate for your project */
-  accel.setRange(ADXL345_RANGE_16_G);
+  accel.setRange(ADXL345_RANGE_4_G);
   // displaySetRange(ADXL345_RANGE_8_G);
   // displaySetRange(ADXL345_RANGE_4_G);
   // displaySetRange(ADXL345_RANGE_2_G);
@@ -252,10 +289,10 @@ void setup_sensors() {
 
   // configure motion thresholds
   accel.writeRegister(ADXL345_REG_THRESH_ACT,
-                      0x4B); // 4x62mg, default factor is 62mg/LSB
+                      0x3C); // 4x62mg, default factor is 62mg/LSB
   accel.writeRegister(
       ADXL345_REG_THRESH_INACT,
-      0x4B); // 4x62mg < of no motion under ADXL345_REG_THRESH_ACT
+      0x3C); // 4x62mg < of no motion under ADXL345_REG_THRESH_ACT
   accel.writeRegister(
       ADXL345_REG_TIME_INACT,
       0xF0); // 240 sec of no motion under ADXL345_REG_THRESH_ACT
@@ -265,7 +302,7 @@ void setup_sensors() {
   // inactivity thresholds
 
   // configure tap/knock thresholds
-  accel.writeRegister(ADXL345_REG_TAP_AXES, 0x21); // enable tap/knock detection
+  accel.writeRegister(ADXL345_REG_TAP_AXES, B00001111); // enable tap/knock detection
   accel.writeRegister(ADXL345_REG_THRESH_TAP,
                       0x64); // 100mg, or greater = a tap/knock
   accel.writeRegister(
@@ -337,7 +374,7 @@ void sleepSensors() {
   }
   Serial.println("Sleeping WiFi connection.");
   WiFi.disconnect(false);
-  digitalWrite(BUILTIN_LED, LOW); // making it blink during read
+  digitalWrite(LED_BUILTIN, LOW); // making it blink during read
   state = STATE_SLEEP;
 }
 
@@ -357,8 +394,9 @@ void sensorReadRFID() {
       nfc.readPassiveTargetID(PN532_MIFARE_ISO14443A, uid, &uidLength, 100);
 
   if (success) {
-    digitalWrite(BUILTIN_LED, LOW); // making it blink during read
+    digitalWrite(LED_BUILTIN, LOW); // making it blink during read
     // Display some basic information about the card
+    #ifdef IOTFOOTBALL_DEBUG
     Serial.println("Found an ISO14443A card");
     Serial.print("  UID Length: ");
     Serial.print(uidLength, DEC);
@@ -366,8 +404,9 @@ void sensorReadRFID() {
     Serial.print("  UID Value: ");
     nfc.PrintHex(uid, uidLength);
     Serial.println("");
+    #endif
 
-    digitalWrite(BUILTIN_LED, HIGH); // making it blink during read
+    digitalWrite(LED_BUILTIN, HIGH); // making it blink during read
   }
 
   // do we need to update last tracked.
@@ -411,12 +450,11 @@ void sensorReadRFID() {
  */
 
 void sensorReadADXL() {
-  bool inactive = false;
   byte source = accel.readRegister(ADXL345_REG_INT_SOURCE);
 
-  while (((source >> 6) & 1) || ((source >> 4) & 1) || ((source >> 3) & 1) ||
-         ((source >> 2) & 1)) {
-    digitalWrite(BUILTIN_LED, LOW); // making it blink during read
+  if (((source >> 6) & 1) || ((source >> 4) & 1) || ((source >> 3) & 1) ||
+        ((source >> 2) & 1)) {
+    digitalWrite(LED_BUILTIN, LOW); // making it blink during read
     StaticJsonBuffer<256> jsonBuffer;
     JsonObject &data = jsonBuffer.createObject();
 
@@ -437,7 +475,8 @@ void sensorReadADXL() {
     // }
 
     // add the current millis to the generated event.
-    data["m_time"] = millis();
+    long mtime = millis();
+    data["m_time"] = mtime;
 
     // detected actions
     String movement = "";
@@ -457,7 +496,6 @@ void sensorReadADXL() {
     {
       movement += (movement.length() == 0 ? "" : ";");
       movement += "inactivity";
-      inactive = true;
     }
 
     data["movement"] = movement;
@@ -476,11 +514,16 @@ void sensorReadADXL() {
     data["m_y"] = y;
     data["m_z"] = z;
 
+    #ifdef IOTFOOTBALL_TRACE
+    Serial.printf("%lu,%d,%d,%d\n", mtime, x, y, z);
+    #endif
+
     String data_buffer = "";
     data.printTo(data_buffer);
 
     queue.push(data_buffer);
 
+    #ifdef IOTFOOTBALL_DEBUG
     Serial.print("Source: ");
     print_byte(source);
     Serial.print(" ");
@@ -494,9 +537,10 @@ void sensorReadADXL() {
     Serial.print(z);
     Serial.print(" ");
     Serial.println("m/s^2 ");
+    #endif
 
     source = accel.readRegister(ADXL345_REG_INT_SOURCE);
-    digitalWrite(BUILTIN_LED, HIGH); // making it blink during read
+    digitalWrite(LED_BUILTIN, HIGH); // making it blink during read
   }
 
   // displayAllSensorRegister();
@@ -520,8 +564,9 @@ void reconnect() {
     // Create a random client ID
     String clientId = "ESP8266Client-";
     clientId += ESP.getChipId();
+    int8_t ret;
     // Attempt to connect
-    if (client->connect(settings.MQTT_USERNAME, settings.MQTT_PASSWORD) == 0) {
+    if ((ret = client->connect(settings.MQTT_USERNAME, settings.MQTT_PASSWORD)) == 0) {
       Serial.println(".. connected");
       StaticJsonBuffer<512> jsonBuffer;
       JsonObject &data = jsonBuffer.createObject();
@@ -532,9 +577,12 @@ void reconnect() {
       data.printTo(data_buffer, sizeof(data_buffer));
       topic->publish(data_buffer);      
     } else {
-      Serial.println(" will try again in in a bit.");
+      Serial.println(" ");
+      Serial.println(client->connectErrorString(ret));
+      client->disconnect();
+      Serial.println(" ... will try again in in a bit.");
       // Wait 1 seconds before retrying
-      delay(500);
+      delay(1000);
     }
   }
 }
@@ -547,9 +595,13 @@ void publish(const char *data) {
     reconnect();
   }
   if (data && client->connected() && (state == STATE_NORMAL || state == STATE_YAWN)) {
+    
+    #ifdef IOTFOOTBALL_INFO
     Serial.print("Publish Data: ");
     Serial.println(data);
-    digitalWrite(BUILTIN_LED,
+    #endif
+    
+    digitalWrite(LED_BUILTIN,
                  LOW); // Turn the LED on (Note that LOW is the voltage level
     if (data) {
       char data_buffer[strlen(data)];
@@ -564,14 +616,11 @@ void publish(const char *data) {
  */
 void processQueue() {
   while (!queue.isEmpty()) {
-    digitalWrite(BUILTIN_LED,
+    digitalWrite(LED_BUILTIN,
                  LOW); // Turn the LED on (Note that LOW is the voltage level
     String data = queue.pop();
-    Serial.print("Process Queue: ");
-    Serial.print(data);
-    Serial.println("");
     publish(data.c_str());
-    digitalWrite(BUILTIN_LED, HIGH); // making it blink during read
+    digitalWrite(LED_BUILTIN, HIGH); // making it blink during read
   }
 }
 
@@ -786,6 +835,6 @@ void displayRange(void) {
 
 void tick() {
   // toggle state
-  int state = digitalRead(BUILTIN_LED); // get the current state of GPIO1 pin
-  digitalWrite(BUILTIN_LED, !state);    // set pin to the opposite state
+  int state = digitalRead(LED_BUILTIN); // get the current state of GPIO1 pin
+  digitalWrite(LED_BUILTIN, !state);    // set pin to the opposite state
 }
